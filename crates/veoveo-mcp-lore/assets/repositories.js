@@ -49,11 +49,16 @@ veoveoGallery((ui) => {
     return trail;
   };
 
-  // Pictures for a folder's card: what it holds first, then a file from each folder inside.
-  const RANK = { image: 0, video: 0, scene: 0, model: 1, document: 2, audio: 3 };
+  // Pictures for a folder's card: what looks like something, first what it holds and then a file
+  // from each folder inside. Text and code would show as pages of small print, and a folder of
+  // them is better shown by its icon.
+  const RANK = { image: 0, video: 0, scene: 0, model: 1, document: 2 };
+  const DOCUMENTS = ["pdf", "doc", "docx", "odt", "xls", "xlsx", "ods", "ppt", "pptx", "odp"];
+  const looksLikeSomething = (item) => item.path && item.kind in RANK
+    && (item.kind !== "document" || DOCUMENTS.includes(ui.extensionOf(item.name)));
   const usable = (repository, folders, entries) => entries
     .map((entry) => itemOf(repository, folders, entry))
-    .filter((item) => item.path && item.kind in RANK)
+    .filter(looksLikeSomething)
     .sort((a, b) => RANK[a.kind] - RANK[b.kind]);
 
   return {
