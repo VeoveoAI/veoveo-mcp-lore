@@ -3622,7 +3622,7 @@ dependencies = [
 [[package]]
 name = "veoveo-hub-ui"
 version = "0.1.0"
-source = "git+https://github.com/VeoveoAI/veoveo-hub-ui?rev=eb94ac31f53f75eba96147b95863ee52ceb55257#eb94ac31f53f75eba96147b95863ee52ceb55257"
+source = "git+https://github.com/VeoveoAI/veoveo-hub-ui?rev=0da3a4b6fdc8c70fe91b26ad2cab90eef2fca5c9#0da3a4b6fdc8c70fe91b26ad2cab90eef2fca5c9"
 
 [[package]]
 name = "veoveo-macros"
