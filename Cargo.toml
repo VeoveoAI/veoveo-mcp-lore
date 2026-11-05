@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+repository = "https://github.com/VeoveoAI/veoveo-mcp-lore"
+publish = false
+
+[workspace.dependencies]
+# veoveo-core, pinned to one revision for every core crate.
+veoveo-skills = { git = "https://github.com/VeoveoAI/veoveo-core", rev = "a8dafe90206d1cadbb1d2de26304fe061a542ffd" }
+veoveo-types = { git = "https://github.com/VeoveoAI/veoveo-core", rev = "a8dafe90206d1cadbb1d2de26304fe061a542ffd" }
+# The Rust SDK for Veoveo MCP servers: the contract feature for declarations, the server
+# feature for hosting, registration and the forwarded identity.
+veoveo-hub-sdk = { git = "https://github.com/VeoveoAI/veoveo-hub-sdk", rev = "14a649f3e37dca39a4bb29fc39dd03c6565b0490", default-features = false }
+# The App's look and its gallery.
+veoveo-hub-ui = { git = "https://github.com/VeoveoAI/veoveo-hub-ui", rev = "fb892c6fe2dfd903fac3a1788c9dea8b7c5d085c" }
+# The Thumb server's contract, for pictures of files. It pins this SDK revision, so the two move together.
+veoveo-mcp-thumb = { git = "https://github.com/VeoveoAI/veoveo-mcp-thumb", rev = "a98c5af59c523ee92461f3025270f3c4e6533fb3", default-features = false }
+
+anyhow = "=1.0.104"
+axum = { version = "0.8.9", default-features = false }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+# The SDK's HTTP client release; registration and the tests share it.
+reqwest = { version = "=0.13.5", default-features = false }
+# The rmcp fork the SDK pins; the tool router uses its macros.
+rmcp = { version = "=3.8.0", git = "https://github.com/VeoveoAI/rust-sdk", rev = "d45f7f5e43e910f818400ca702cc904c5682c213" }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+secrecy = "0.10.3"
+tempfile = "=3.27.0"
+tracing = "0.1.44"
+url = "=2.5.8"
+
+schemars = { version = "1.2.2", features = ["uuid1"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+thiserror = "=2.0.21"
+tokio = "1.53.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
