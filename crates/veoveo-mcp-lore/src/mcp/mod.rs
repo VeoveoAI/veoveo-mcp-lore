@@ -29,7 +29,7 @@ pub use setup::LoreContract;
 use setup::SERVER_SETUP;
 
 /// The App's address.
-pub const APP_URI: &str = "ui://lore/repositories";
+pub const APP_URI: &str = "ui://lore-api/repositories";
 /// The App's programmatic resource name.
 const APP_NAME: &str = "repositories";
 /// The App's title.

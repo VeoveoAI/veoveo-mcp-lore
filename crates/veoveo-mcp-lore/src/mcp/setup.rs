@@ -12,15 +12,15 @@ use veoveo_types::ResourceScheme;
 
 use crate::contract::{LoreProvider, LoreScope};
 
-/// The crate documents embedded at build time and served under `lore://docs`,
-/// `lore://docs/{doc_id}`, `lore://contract` and the admin document routes.
+/// The crate documents embedded at build time and served under `lore-api://docs`,
+/// `lore-api://docs/{doc_id}`, `lore-api://contract` and the admin document routes.
 pub(crate) static SERVER_DOCS: LazyLock<ServerDocs> =
-    LazyLock::new(|| veoveo_hub_sdk::server_docs!("lore"));
+    LazyLock::new(|| veoveo_hub_sdk::server_docs!("lore-api"));
 
 /// The skills under `skills/`, embedded at build time by `build.rs` and served at
-/// `skill://lore/…`.
+/// `skill://lore-api/…`.
 pub(crate) static SERVER_SKILLS: LazyLock<ServerSkills> =
-    LazyLock::new(|| veoveo_hub_sdk::server_skills!("lore"));
+    LazyLock::new(|| veoveo_hub_sdk::server_skills!("lore-api"));
 
 pub struct LoreContract;
 
@@ -33,7 +33,7 @@ impl McpServerContract for LoreContract {
     type Provider = LoreProvider;
 
     fn scheme() -> ResourceScheme {
-        ResourceScheme::parse("lore").expect("declared lore scheme")
+        ResourceScheme::parse("lore-api").expect("declared lore-api scheme")
     }
     fn scopes() -> &'static [LoreScope] {
         <LoreScope as veoveo_types::Vocabulary>::ALL
@@ -63,7 +63,7 @@ fn server_config() -> ServerConfig {
     }
     let mut info = ServerConfig::default();
     info.capabilities = capabilities;
-    info.server_info = rmcp::model::Implementation::new("lore", env!("CARGO_PKG_VERSION"));
+    info.server_info = rmcp::model::Implementation::new("lore-api", env!("CARGO_PKG_VERSION"));
     info.instructions = Some(INSTRUCTIONS.to_owned());
     info
 }
@@ -71,7 +71,7 @@ fn server_config() -> ServerConfig {
 /// What the server is and which skill says how to use it. A server's instructions say no
 /// more: its guidance is in its skills.
 const INSTRUCTIONS: &str = "Shows what the Lore repositories you can read hold. Its skill says how: \
-     skill://lore/browse-repositories/SKILL.md.";
+     skill://lore-api/browse-repositories/SKILL.md.";
 
 #[cfg(test)]
 mod tests {

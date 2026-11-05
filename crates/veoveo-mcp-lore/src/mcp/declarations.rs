@@ -15,7 +15,7 @@ use super::setup::LoreContract;
 pub static REGISTRATION: OnceLock<RegistrationDeclaration> = OnceLock::new();
 
 /// The server's identity and the URL where the Hub reaches its MCP endpoint:
-/// `{public_base_url}/lore/mcp`.
+/// `{public_base_url}/lore-api/mcp`.
 pub fn registration(
     deployment: &PublicDeployment,
     deployment_id: veoveo_hub_sdk::DeploymentId,
@@ -46,9 +46,9 @@ mod tests {
         .unwrap();
         assert_eq!(
             registration.endpoint.url().as_str(),
-            "http://vv-mcp-lore.internal:8808/lore/mcp"
+            "http://vv-mcp-lore.internal:8808/lore-api/mcp"
         );
-        assert_eq!(registration.slug.as_str(), "lore");
-        assert_eq!(registration.uri_scheme.as_str(), "lore");
+        assert_eq!(registration.slug.as_str(), "lore-api");
+        assert_eq!(registration.uri_scheme.as_str(), "lore-api");
     }
 }

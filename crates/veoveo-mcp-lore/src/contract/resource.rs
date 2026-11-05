@@ -1,4 +1,4 @@
-//! The server's resource addresses under the `lore` scheme. The route declaration
+//! The server's resource addresses under the `lore-api` scheme. The route declaration
 //! owns each shape and its typed parameters; the shared URI machinery owns encoding and
 //! parsing, so no address is built or split by hand.
 use std::{borrow::Cow, error::Error, fmt};
@@ -16,7 +16,9 @@ impl fmt::Display for LoreResourceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Uri(error) => error.fmt(f),
-            Self::UnknownResource => f.write_str("unknown or noncanonical lore resource address"),
+            Self::UnknownResource => {
+                f.write_str("unknown or noncanonical lore-api resource address")
+            }
         }
     }
 }
@@ -36,7 +38,7 @@ impl From<ResourceUriError> for LoreResourceError {
     }
 }
 
-/// A document the server embeds and serves under `lore://docs/{doc_id}`.
+/// A document the server embeds and serves under `lore-api://docs/{doc_id}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Vocabulary)]
 pub enum LoreDocument {
     /// The agent work manual, `AGENTS.md`.
@@ -48,11 +50,11 @@ pub enum LoreDocument {
 /// A resource of the server.
 #[veoveo_types::resource_address(routes(LoreAddresses), schema = derived, wire, parse = borrowed, display)]
 pub enum LoreResource {
-    #[resource(template = "lore://docs")]
+    #[resource(template = "lore-api://docs")]
     Docs,
-    #[resource(template = "lore://docs/{doc_id}")]
+    #[resource(template = "lore-api://docs/{doc_id}")]
     Document(#[resource(variable = "doc_id", codec = LoreFieldCodec)] LoreDocument),
-    #[resource(template = "lore://contract")]
+    #[resource(template = "lore-api://contract")]
     Contract,
 }
 
@@ -98,7 +100,11 @@ mod tests {
 
     #[test]
     fn addresses_round_trip_through_their_routes() {
-        for uri in ["lore://docs", "lore://docs/agents", "lore://contract"] {
+        for uri in [
+            "lore-api://docs",
+            "lore-api://docs/agents",
+            "lore-api://contract",
+        ] {
             let address = parse(uri).unwrap_or_else(|error| panic!("{uri}: {error}"));
             assert_eq!(address.to_uri().unwrap().as_str(), uri);
         }
@@ -107,9 +113,9 @@ mod tests {
     #[test]
     fn malformed_addresses_are_refused() {
         for uri in [
-            "lore://docs/unknown",
-            "lore://other",
-            "lore://contract/extra",
+            "lore-api://docs/unknown",
+            "lore-api://other",
+            "lore-api://contract/extra",
             "media://contract",
         ] {
             assert!(parse(uri).is_err(), "{uri}");

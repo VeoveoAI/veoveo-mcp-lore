@@ -19,7 +19,7 @@ pub(super) struct Args {
     #[arg(long, env = "VEOVEO_PORT", default_value_t = 8808)]
     pub port: u16,
     /// The origin where the Hub reaches the server; it serves MCP at
-    /// `{public_base_url}/lore/mcp` and registers that URL.
+    /// `{public_base_url}/lore-api/mcp` and registers that URL.
     #[arg(long, env = "VEOVEO_PUBLIC_BASE_URL")]
     pub public_base_url: String,
     /// The Hub's RFC 8414 issuer; registration discovers its endpoint from there.
@@ -43,7 +43,7 @@ pub(super) struct Args {
     #[arg(
         long,
         env = "VEOVEO_KEY_DIRECTORY",
-        default_value = "/var/lib/veoveo/lore/keys"
+        default_value = "/var/lib/veoveo/lore-api/keys"
     )]
     pub key_directory: PathBuf,
     #[arg(long, env = "VEOVEO_ALLOW_LOOPBACK_HOSTS", default_value_t = false)]

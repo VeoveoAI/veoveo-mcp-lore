@@ -79,11 +79,14 @@ async fn the_app_is_the_shared_gallery_with_this_servers_adapter() {
             .as_array()
             .unwrap_or_else(|| panic!("{resources}"))
             .iter()
-            .find(|resource| resource["uri"] == "ui://lore/repositories")
+            .find(|resource| resource["uri"] == "ui://lore-api/repositories")
             .expect("the App is listed");
         assert_eq!(app["mimeType"], "text/html;profile=mcp-app");
         let document = reader
-            .rpc("resources/read", json!({"uri": "ui://lore/repositories"}))
+            .rpc(
+                "resources/read",
+                json!({"uri": "ui://lore-api/repositories"}),
+            )
             .await;
         let html = document["result"]["contents"][0]["text"]
             .as_str()
@@ -106,7 +109,10 @@ async fn the_app_is_the_shared_gallery_with_this_servers_adapter() {
                 .iter()
                 .find(|tool| tool["name"] == name)
                 .unwrap();
-            assert_eq!(tool["_meta"]["ui"]["resourceUri"], "ui://lore/repositories");
+            assert_eq!(
+                tool["_meta"]["ui"]["resourceUri"],
+                "ui://lore-api/repositories"
+            );
         }
     })
     .await
@@ -118,7 +124,7 @@ async fn the_skill_is_listed() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let listed = hub(&[FilesRead]).rpc("skills/list", json!({})).await;
         assert_eq!(
-            listed["result"]["skills"][0]["uri"], "skill://lore/browse-repositories/SKILL.md",
+            listed["result"]["skills"][0]["uri"], "skill://lore-api/browse-repositories/SKILL.md",
             "{listed}"
         );
     })
