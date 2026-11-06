@@ -50,6 +50,7 @@ const veoveoViewer = (() => {
   const PICTURES = new Set(["usd", "usda", "usdc", "usdz", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "ico", "psd", "svg", "tga", "exr", "hdr", "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "mpg", "mpeg", "ogv", "3gp", "glb", "gltf", "fbx", "obj", "stl", "ply", "dae", "3ds", "off", "step", "stp", "iges", "igs", "brep", "3mf", "pdf", "doc", "docx", "odt", "xls", "xlsx", "ods", "ppt", "pptx", "odp"]);
   const showsPicture = (path) => PICTURES.has(extension(path));
   const hasText = (path) => !showsPicture(path) || extension(path) === "usda";
+  const isStage = (path) => ["usd", "usda", "usdc", "usdz"].includes(extension(path));
   const dayOf = (at) => {
     const date = new Date(at);
     const midnight = (value) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
@@ -554,7 +555,8 @@ const veoveoViewer = (() => {
     const parent = state.pushes.find((candidate) => candidate.repository === push.repository && candidate.revision === push.parent);
     const list = answer?.changes || [];
     const sorted = [
-      ...list.filter((change) => change.type === "file" && showsPicture(change.path)),
+      ...list.filter((change) => change.type === "file" && isStage(change.path)),
+      ...list.filter((change) => change.type === "file" && showsPicture(change.path) && !isStage(change.path)),
       ...list.filter((change) => change.type === "link"),
       ...list.filter((change) => change.type === "file" && !showsPicture(change.path)),
     ];
