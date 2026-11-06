@@ -271,11 +271,14 @@ impl Index {
     }
 }
 
+/// A branch of a repository.
+type Place = (RepositoryId, BranchName);
+
 /// The latest index of each repository's branch.
 #[derive(Clone, Default)]
 pub struct Indexes {
-    held: Arc<Mutex<HashMap<(RepositoryId, BranchName), Arc<Index>>>>,
-    turns: Arc<Mutex<HashMap<(RepositoryId, BranchName), Arc<tokio::sync::Mutex<()>>>>>,
+    held: Arc<Mutex<HashMap<Place, Arc<Index>>>>,
+    turns: Arc<Mutex<HashMap<Place, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl Indexes {
