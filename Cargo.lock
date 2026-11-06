@@ -610,6 +610,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
+name = "diffy"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e3dc2f773b6aaa63b1a7684b8589f670a8a0146a510b74d23a401c882364b49"
+dependencies = [
+ "hashbrown 0.17.1",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3622,7 +3631,7 @@ dependencies = [
 [[package]]
 name = "veoveo-hub-ui"
 version = "0.1.0"
-source = "git+https://github.com/VeoveoAI/veoveo-hub-ui?rev=aa2836e3d078a89d11323f434be4cc9b5da15493#aa2836e3d078a89d11323f434be4cc9b5da15493"
+source = "git+https://github.com/VeoveoAI/veoveo-hub-ui?rev=632e0fb479f9e62889d8c99f40bda79aeb1b60e9#632e0fb479f9e62889d8c99f40bda79aeb1b60e9"
 
 [[package]]
 name = "veoveo-macros"
@@ -3636,12 +3645,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "veoveo-mcp-lore"
+name = "veoveo-mcp-repo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "diffy",
  "dotenvy",
  "futures",
  "reqwest",
