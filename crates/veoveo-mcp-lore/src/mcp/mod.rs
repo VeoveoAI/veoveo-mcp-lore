@@ -7,7 +7,10 @@ use futures::{StreamExt as _, TryStreamExt as _};
 use rmcp::{ErrorData as McpError, RoleServer, service::RequestContext};
 use std::{
     collections::HashSet,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use veoveo_hub_sdk::{
     apps::{AppHtml, AppUri, UiVisibility},
@@ -323,6 +326,8 @@ impl LoreMcp {
         branch: &BranchName,
         index: &Index,
     ) -> bool {
+        let missed = AtomicBool::new(false);
+        let missed = &missed;
         let drawn = futures::stream::iter(index.pictured().into_iter().map(Ok::<_, ()>))
             .try_for_each_concurrent(DRAWN_AHEAD, |path| async move {
                 let (Some(key), Ok(file)) = (
@@ -354,13 +359,19 @@ impl LoreMcp {
                     .map_err(|error| {
                         tracing::debug!(%error, "a picture was not drawn ahead");
                     })?;
+                // An empty answer for a stage may only mean its server is away, so it is left to
+                // be asked again, and this revision is not done.
+                if answer.data.is_none() && is_stage(&path) {
+                    missed.store(true, Ordering::Relaxed);
+                    return Ok(());
+                }
                 self.pictures
                     .keep(&key, &kept_of(answer.media_type, answer.data))
                     .await;
                 Ok(())
             })
             .await;
-        drawn.is_ok()
+        drawn.is_ok() && !missed.load(Ordering::Relaxed)
     }
 
     /// What is kept of what a page shows.
@@ -552,7 +563,10 @@ impl LoreMcp {
             .call(asked)
             .await
             .map_err(|error| ToolError::Rejected(format!("reading the file: {error}")))?;
-        if request.size == ThumbnailSize::Small {
+        // An empty answer for a stage may only mean its server is away.
+        if request.size == ThumbnailSize::Small
+            && (drawn.data.is_some() || !is_stage(request.path.file_name()))
+        {
             let kept = kept_of(drawn.media_type.clone(), drawn.data.clone());
             self.keep(
                 &self.reader(&context)?,
