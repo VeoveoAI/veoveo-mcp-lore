@@ -6,11 +6,13 @@
 pub mod contract;
 
 #[cfg(feature = "server")]
-pub mod covers;
-#[cfg(feature = "server")]
 pub mod hub;
 #[cfg(feature = "server")]
+pub mod index;
+#[cfg(feature = "server")]
 pub mod mcp;
+#[cfg(feature = "server")]
+pub mod pictures;
 #[cfg(feature = "server")]
 pub mod server;
 

@@ -3,7 +3,7 @@
 Lore for agents and people. It starts with seeing what is there: what the repositories a person can read hold, and a gallery of them. It
 is where Lore's API grows, as tools over the same reads.
 
-It reads as the person who asked, through the Hub, so Lore's rules decide every read. It keeps nothing on disk.
+It reads as the person who asked, through the Hub, so Lore's rules decide every read. It keeps only small pictures it was handed.
 
 ## Service Identity
 
@@ -37,6 +37,7 @@ opens on the Hub's `/view/lore/` page, and files are still read through the Hub'
 |---|---|---|---|
 | Tool | `list_files` | `lore-api.files.read` | `FileListing`: without a `repository`, the repositories the caller can read; with one, a folder of it on `branch`, `main` by default, folders first |
 | Tool, for its App | `thumbnail` | `lore-api.files.read` | `FileThumbnail`: a picture of a file, in base64, or none |
+| Tool, for its App | `browse` | `lore-api.files.read` | `Browse`: one page of the repositories, of a folder or of a `search`, with the pictures of what is on it that are ready |
 | Tool, for its App | `covers` | `lore-api.files.read` | `Covers`: the files, at most four, that show each of up to 64 folders on its card |
 | Tool, for its App | `thumbnails` | `lore-api.files.read` | `FileThumbnails`: what is ready of up to 64 files by one request, each a picture, nothing, or `pending` for `thumbnail` |
 | App | `ui://lore-api/repositories` | `lore-api.files.read` | The gallery |
@@ -49,11 +50,23 @@ opens on the Hub's `/view/lore/` page, and files are still read through the Hub'
 what it holds. The look and the behavior are [veoveo-hub-ui](https://github.com/VeoveoAI/veoveo-hub-ui)'s gallery. `assets/repositories.js`
 says what is Lore's: how to list, what a location is, and the `/view/lore/{repository}/{branch}/{path}` page a file opens on.
 
-This server, not the page, decides what shows a folder: pictures of what it holds, its own files first and then one from each of up to six
-folders inside, leaving out text and code, which would show as small print. `covers` reads the top of each repository named, as the person,
-so Lore decides whether they read it now and the answer names the branch's revision. A revision fixes everything under it, so what was found
-at one stays true, and is remembered in memory, including that a folder has nothing to show. One request answers a screen of cards, and after
-the first one it costs one listing per repository.
+This server, not the page, decides what a screen shows, so that a repository of any size costs a screen one request. One read of the Hub's
+`/tree/` route names everything on a branch's tip, and a revision fixes everything under it, so what follows from that read is held in memory by
+revision and needs no further read of Lore:
+
+- **A folder's cover:** pictures of what it holds at any depth, a stage first, then one from each folder inside, leaving out text and code, which would
+  show as small print.
+- **An object:** a folder with exactly one stage in it, at any depth, is one object known by the folder's name, whatever the stage's file is called. It
+  shows and opens that stage, and its closer look leads into its files.
+- **A page and a search:** `browse` answers 60 items at a time, and `search` finds names at any depth, stopping at an object.
+
+Each `browse` of a repository first reads its top as the person, so Lore decides whether they read it now and the answer names the tip; only a new tip reads
+the whole tree again. A page of repositories reads none of them: it shows what was last known of each, which a person with a grant on it may see, and asks
+`covers` for those not known yet.
+
+Pictures come with the page. `thumbnails` and `thumbnail` keep each small picture the Thumb server answers, on disk, under what it shows: the file's
+content address, and for a stage that is not a package the revision too, since it may name other files. `browse` answers from what is kept, up to 3 MiB a
+page, and the page asks for the rest. A page names only what its person's read listed, so what is kept reaches no one else, and any of it can be fetched again.
 
 It shows `main`. A branch is a tool argument, not yet a choice in the App.
 
@@ -63,12 +76,12 @@ It shows `main`. A branch is a tool argument, not yet a choice in the App.
 
 ## Persistence
 
-No tables. The registration's `keys/` under `/sandbox/state`. Covers are remembered in memory and found again after a restart.
+No tables. The registration's `keys/` and the `pictures/` it was handed under `/sandbox/state`, all of which can be fetched again. An index is held in memory and read again after a restart.
 
 ## Qualification
 
 | Layer | What it proves |
 |---|---|
-| Unit | Names, a listing's shape, what shows a folder, the App's document |
+| Unit | Names, a listing's shape, what shows a folder, which folders are objects, a page and a search, kept pictures, the App's document |
 | `tests/mcp.rs` | Discovery, permissions, a refused path, the App, the skill's manifest |
 | Deployed | Grants deciding what a person sees, and the gallery in browsers |

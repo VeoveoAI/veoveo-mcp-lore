@@ -95,6 +95,81 @@ pub struct ThumbnailRequest {
 
 /// The most folders one `covers` names, and files one `thumbnails` names.
 pub const MOST_AT_ONCE: usize = 64;
+/// The most items one `browse` answers.
+pub const MOST_ON_A_PAGE: u32 = 120;
+
+/// The arguments of `browse`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[veoveo_hub_sdk::tool(provider = LoreProvider, output = Browse, name = "browse")]
+pub struct BrowseRequest {
+    /// The repository to browse. Without one, the repositories you can read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<RepositoryId>,
+    /// The branch to read; `main` by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<BranchName>,
+    /// The folder; the repository's top by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<FilePath>,
+    /// Find names that hold this, at any depth under the folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
+    /// The `next` of the page before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// How many items, at most 120.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One name on a page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BrowseItem {
+    pub name: String,
+    /// The repository, for a page of repositories; otherwise the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<RepositoryId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<FilePath>,
+    #[serde(rename = "type")]
+    pub entry_type: EntryType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// For a folder with exactly one stage in it, at any depth: that stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<FilePath>,
+    /// The files whose pictures show a folder. Absent when that is not known yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover: Option<Vec<FilePath>>,
+}
+
+/// A picture a page's items show, or that the file has none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PagePicture {
+    pub repository: RepositoryId,
+    pub path: FilePath,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+}
+
+/// One page, with the pictures of what is on it that are ready.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(veoveo_hub_sdk::SingleOutput)]
+pub struct Browse {
+    pub items: Vec<BrowseItem>,
+    /// How many items there are in all.
+    pub total: u64,
+    /// Asks for the next page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+    pub pictures: Vec<PagePicture>,
+}
 
 /// A folder of a repository; none is its top.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

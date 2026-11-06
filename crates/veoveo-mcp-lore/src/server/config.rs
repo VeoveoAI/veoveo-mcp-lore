@@ -46,6 +46,13 @@ pub(super) struct Args {
         default_value = "/var/lib/veoveo/lore-api/keys"
     )]
     pub key_directory: PathBuf,
+    /// Where small pictures this server was handed are kept. Any of them can be fetched again.
+    #[arg(
+        long,
+        env = "VEOVEO_PICTURE_DIRECTORY",
+        default_value = "/var/lib/veoveo/lore-api/pictures"
+    )]
+    pub picture_directory: PathBuf,
     #[arg(long, env = "VEOVEO_ALLOW_LOOPBACK_HOSTS", default_value_t = false)]
     pub allow_loopback_hosts: bool,
     #[arg(

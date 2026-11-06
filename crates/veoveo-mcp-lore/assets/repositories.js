@@ -1,42 +1,65 @@
-// The Lore repositories a person can read, then their folders and files. A location is
-// { repository: { id, name }, folders: [names] }, and none is the list of repositories.
+// The Lore repositories a person can read, then what each holds, a page at a time. The server says
+// what shows each folder, which folders are one object, and answers the pictures that are ready with
+// the page. A location is { repository: { id, name }, folders: [names] }, and none is the list of
+// repositories.
 veoveoGallery((ui) => {
   const BRANCH = "main";
-  const pathOf = (folders, name) => [...folders, name].join("/");
   const viewUrl = (repository, path) =>
     `/${["view", "lore", repository, BRANCH, ...path.split("/")].map(encodeURIComponent).join("/")}`;
-  const listed = async (repository, folders) => {
-    const args = { repository: repository.id, branch: BRANCH };
-    if (folders.length) args.path = folders.join("/");
-    return (await ui.tool("list_files", args)).entries || [];
-  };
+  const keyOf = (repository, path) => `${repository.id}\0${path}`;
+  const coverOf = (repository, cover) => cover.map((path) => ({ key: keyOf(repository, path), repository, path }));
 
-  const repositoryItem = (repository) => ({
-    key: `repository\0${repository.id}`,
-    name: repository.name,
-    kind: "repository",
-    about: "Repository",
-    folder: true,
-    repository,
-    folders: [],
-  });
-  const itemOf = (repository, folders, entry) => {
-    const path = pathOf(folders, entry.name);
-    const key = `${repository.id}\0${path}`;
-    if (entry.type === "directory") {
-      return { key, name: entry.name, kind: "folder", about: ui.size(entry.size) || "Folder", folder: true, repository, folders: [...folders, entry.name] };
-    }
+  const repositoryItem = (entry) => {
+    const repository = { id: entry.repository, name: entry.name };
+    return {
+      key: `repository\0${repository.id}`,
+      name: repository.name,
+      kind: "repository",
+      about: "Repository",
+      folder: true,
+      repository,
+      folders: [],
+      cover: entry.cover && coverOf(repository, entry.cover),
+    };
+  };
+  const itemOf = (repository, entry) => {
     if (entry.type === "link") {
-      return { key, name: entry.name, kind: "link", about: "Linked repository", disabled: true };
+      return { key: keyOf(repository, entry.path), name: entry.name, kind: "link", about: "Linked repository", disabled: true };
+    }
+    const fields = { repository, branch: BRANCH, path: entry.stage || entry.path, type: entry.type, size: entry.size };
+    if (entry.stage) {
+      return {
+        key: keyOf(repository, entry.stage),
+        name: entry.name,
+        kind: "scene",
+        badge: "",
+        about: ui.size(entry.size),
+        fields,
+        repository,
+        path: entry.stage,
+        into: { repository, folders: entry.path.split("/") },
+      };
+    }
+    if (entry.type === "directory") {
+      return {
+        key: keyOf(repository, entry.path),
+        name: entry.name,
+        kind: "folder",
+        about: ui.size(entry.size) || "Folder",
+        folder: true,
+        repository,
+        folders: entry.path.split("/"),
+        cover: entry.cover && coverOf(repository, entry.cover),
+      };
     }
     return {
-      key,
+      key: keyOf(repository, entry.path),
       name: entry.name,
       kind: ui.kindOf(entry.name),
       about: ui.size(entry.size),
-      fields: { repository, branch: BRANCH, path, type: entry.type, size: entry.size },
+      fields,
       repository,
-      path,
+      path: entry.path,
     };
   };
 
@@ -50,24 +73,31 @@ veoveoGallery((ui) => {
 
   return {
     title: "Repositories",
-    list: async ({ at }) => {
-      if (!at) {
-        const listing = await ui.tool("list_files", {});
-        return {
-          items: (listing.repositories || []).map(repositoryItem),
-          trail: [{ label: "Repositories" }],
-          empty: "You can read no repositories yet.",
-        };
+    placeholder: "Search",
+    remoteSearch: true,
+    list: async ({ at, search, cursor }) => {
+      const asked = {};
+      if (at) {
+        asked.repository = at.repository.id;
+        asked.branch = BRANCH;
+        if (at.folders.length) asked.path = at.folders.join("/");
       }
-      const entries = await listed(at.repository, at.folders);
+      if (search) asked.search = search;
+      if (cursor) asked.cursor = cursor;
+      const page = await ui.tool("browse", asked);
       return {
-        items: entries.map((entry) => itemOf(at.repository, at.folders, entry)),
-        trail: trailOf(at),
-        empty: "This folder is empty.",
+        items: at ? page.items.map((entry) => itemOf(at.repository, entry)) : page.items.map(repositoryItem),
+        next: page.next,
+        trail: at ? trailOf(at) : [{ label: "Repositories" }],
+        empty: at ? "Nothing here." : "You can read no repositories yet.",
+        pictures: page.pictures.map((picture) => ({
+          key: `${picture.repository}\0${picture.path}`,
+          mediaType: picture.mediaType,
+          data: picture.data,
+        })),
       };
     },
     enter: (item) => ({ repository: item.repository, folders: item.folders }),
-    // The server says what shows each folder.
     covers: async (items) => {
       const { covers } = await ui.tool("covers", {
         branch: BRANCH,
@@ -75,11 +105,7 @@ veoveoGallery((ui) => {
           ? { repository: item.repository.id, path: item.folders.join("/") }
           : { repository: item.repository.id })),
       });
-      return items.map((item, index) => (covers[index]?.files || []).map((path) => ({
-        key: `${item.repository.id}\0${path}`,
-        repository: item.repository,
-        path,
-      })));
+      return items.map((item, index) => coverOf(item.repository, covers[index]?.files || []));
     },
     thumbnails: async (items, size) => (await ui.tool("thumbnails", {
       files: items.map((item) => ({ repository: item.repository.id, branch: BRANCH, path: item.path })),

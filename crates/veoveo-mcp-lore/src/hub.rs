@@ -14,6 +14,8 @@ use crate::contract::{BranchName, FilePath, RepositoryId};
 
 /// How long a listing may take.
 const LISTING_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a whole tree may take.
+const TREE_TIMEOUT: Duration = Duration::from_secs(180);
 /// The header that names the revision a read was made at.
 const REVISION: &str = "lore-revision";
 
@@ -98,12 +100,32 @@ pub struct Entry {
     pub size: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
     File,
     Directory,
     Link,
+}
+
+/// Everything on a branch's tip.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Tree {
+    pub entries: Vec<TreeEntry>,
+    #[serde(skip)]
+    pub revision: Option<String>,
+}
+
+/// One name in a tree, by its whole path.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct TreeEntry {
+    pub path: String,
+    #[serde(rename = "type")]
+    pub kind: EntryKind,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub address: Option<String>,
 }
 
 /// A successful answer of the Hub.
@@ -146,14 +168,14 @@ impl Hub {
 }
 
 impl Reader {
-    async fn get(&self, url: url::Url) -> Result<Answer, HubError> {
+    async fn get(&self, url: url::Url, timeout: Duration) -> Result<Answer, HubError> {
         let bearer = self.client.hub_bearer().await?;
         let response = self
             .hub
             .http
             .get(url)
             .bearer_auth(bearer.expose())
-            .timeout(LISTING_TIMEOUT)
+            .timeout(timeout)
             .send()
             .await?;
         let status = response.status();
@@ -180,7 +202,7 @@ impl Reader {
         let url = self
             .hub
             .route(["lore", self.profile.as_str(), "repositories"]);
-        let answer = self.get(url).await?;
+        let answer = self.get(url, LISTING_TIMEOUT).await?;
         Ok(serde_json::from_slice::<Repositories>(&answer.body)?.repositories)
     }
 
@@ -204,8 +226,32 @@ impl Reader {
             .chain(folder.into_iter().flat_map(FilePath::segments))
             .chain([""]),
         );
-        let answer = self.get(url).await?;
+        let answer = self.get(url, LISTING_TIMEOUT).await?;
         Ok(Listing {
+            revision: answer.revision,
+            ..serde_json::from_slice(&answer.body)?
+        })
+    }
+}
+
+impl Reader {
+    /// `GET /lore/{profile}/repositories/{id}/tree/{branch}`: everything on the branch's tip, by
+    /// one read.
+    pub async fn tree(
+        &self,
+        repository: &RepositoryId,
+        branch: &BranchName,
+    ) -> Result<Tree, HubError> {
+        let url = self.hub.route([
+            "lore",
+            self.profile.as_str(),
+            "repositories",
+            repository.as_str(),
+            "tree",
+            branch.as_str(),
+        ]);
+        let answer = self.get(url, TREE_TIMEOUT).await?;
+        Ok(Tree {
             revision: answer.revision,
             ..serde_json::from_slice(&answer.body)?
         })

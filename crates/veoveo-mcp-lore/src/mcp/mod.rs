@@ -3,6 +3,7 @@ mod declarations;
 mod requirements;
 mod setup;
 
+use futures::StreamExt as _;
 use rmcp::{ErrorData as McpError, RoleServer, service::RequestContext};
 use std::sync::LazyLock;
 use veoveo_hub_sdk::{
@@ -17,12 +18,15 @@ use veoveo_mcp_thumb::contract as thumb;
 
 use crate::{
     contract::{
-        BranchName, Covers, CoversRequest, DEFAULT_BRANCH, EntryType, FileEntry, FileListing,
-        FileThumbnail, FileThumbnails, ListFilesRequest, LorePermission, MOST_AT_ONCE,
-        ReadyThumbnail, RepositorySummary, ThumbnailRequest, ThumbnailSize, ThumbnailsRequest,
+        BranchName, Browse, BrowseItem, BrowseRequest, Cover, Covers, CoversRequest,
+        DEFAULT_BRANCH, EntryType, FileEntry, FileListing, FilePath, FileThumbnail, FileThumbnails,
+        ListFilesRequest, LorePermission, MOST_AT_ONCE, MOST_ON_A_PAGE, PagePicture,
+        ReadyThumbnail, RepositoryId, RepositorySummary, ThumbnailRequest, ThumbnailSize,
+        ThumbnailsRequest,
     },
-    covers::{self, CoverMemory},
     hub::{EntryKind, Hub, HubError, Reader},
+    index::{Index, Indexes, Item},
+    pictures::{Kept, Pictures},
 };
 
 pub use declarations::{REGISTRATION, registration};
@@ -36,6 +40,13 @@ pub const APP_URI: &str = "ui://lore-api/repositories";
 const APP_NAME: &str = "repositories";
 /// The App's title.
 const APP_TITLE: &str = "Repositories";
+/// How many items a page holds unless asked.
+const PAGE: u32 = 60;
+/// How many reads one call makes at once.
+const READS_AT_ONCE: usize = 8;
+/// The most base64 one page answers, well inside an MCP response. A page's other pictures are asked
+/// for afterwards.
+const MOST_PAGE_BYTES: usize = 3 * 1024 * 1024;
 /// What the App adds to the gallery.
 const APP_ADAPTER: &str = include_str!("../../assets/repositories.js");
 
@@ -52,15 +63,18 @@ pub fn app_document() -> std::io::Result<AppHtml> {
 pub struct LoreMcp {
     hub: Hub,
     app: AppHtml,
-    covers: CoverMemory,
+    indexes: Indexes,
+    pictures: Pictures,
 }
 
 impl LoreMcp {
-    pub fn new(hub: Hub) -> std::io::Result<Self> {
+    /// Pictures it is handed are kept under `pictures`.
+    pub fn new(hub: Hub, pictures: std::path::PathBuf) -> std::io::Result<Self> {
         Ok(Self {
             hub,
             app: app_document()?,
-            covers: CoverMemory::default(),
+            indexes: Indexes::default(),
+            pictures: Pictures::new(pictures)?,
         })
     }
 
@@ -135,6 +149,143 @@ impl LoreMcp {
         })
     }
 
+    /// One page of what a repository holds, or of the repositories, with the pictures of what is
+    /// on it that are ready, so that a screen is one request.
+    async fn browse(
+        &self,
+        request: BrowseRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Browse, ToolError> {
+        let reader = self.reader(&context)?;
+        let branch = branch_or_default(request.branch);
+        let limit = request.limit.unwrap_or(PAGE).clamp(1, MOST_ON_A_PAGE) as usize;
+        let offset = match request.cursor.as_deref() {
+            None => 0,
+            Some(cursor) => cursor
+                .parse()
+                .map_err(|_| ToolError::Rejected("not a page of this listing".to_owned()))?,
+        };
+        let search = request
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|search| !search.is_empty());
+        let (items, total, wanted) = match request.repository {
+            None => {
+                let mut repositories = reader
+                    .repositories()
+                    .await
+                    .map_err(|error| refused("listing your repositories", &error))?;
+                repositories.sort_by_key(|repository| repository.name.to_lowercase());
+                if let Some(search) = search {
+                    let search = search.to_lowercase();
+                    repositories
+                        .retain(|repository| repository.name.to_lowercase().contains(&search));
+                }
+                let total = repositories.len();
+                let mut wanted = Vec::new();
+                let items = repositories
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .map(|repository| {
+                        let known = self.indexes.latest(&repository.id, &branch);
+                        let cover = known.as_ref().map(|index| files(&index.cover_of("")));
+                        if let (Some(index), Some(cover)) = (&known, &cover) {
+                            for path in cover {
+                                wanted.push((repository.id.clone(), index.clone(), path.clone()));
+                            }
+                        }
+                        BrowseItem {
+                            name: repository.name,
+                            repository: Some(repository.id),
+                            path: None,
+                            entry_type: EntryType::Directory,
+                            size: None,
+                            stage: None,
+                            cover,
+                        }
+                    })
+                    .collect();
+                (items, total, wanted)
+            }
+            Some(repository) => {
+                let index = self
+                    .indexes
+                    .at_tip(&reader, &repository, &branch)
+                    .await
+                    .map_err(|error| refused("reading the repository", &error))?;
+                let folder = request.path.as_ref().map_or("", FilePath::as_str);
+                let page = match search {
+                    Some(search) => index.search(folder, search, offset, limit),
+                    None => index.page(folder, offset, limit),
+                }
+                .ok_or_else(|| ToolError::Rejected("this folder is not there".to_owned()))?;
+                let mut wanted = Vec::new();
+                let items = page
+                    .0
+                    .iter()
+                    .map(|item| {
+                        let browsed = browse_item(item);
+                        let shows = match (&browsed.entry_type, &browsed.stage, &browsed.cover) {
+                            (EntryType::File, _, _) => browsed.path.clone().into_iter().collect(),
+                            (_, Some(stage), _) => vec![stage.clone()],
+                            (_, None, Some(cover)) => cover.clone(),
+                            _ => Vec::new(),
+                        };
+                        for path in shows {
+                            wanted.push((repository.clone(), index.clone(), path));
+                        }
+                        browsed
+                    })
+                    .collect();
+                (items, page.1, wanted)
+            }
+        };
+        let end = offset.saturating_add(limit);
+        Ok(Browse {
+            items,
+            total: total as u64,
+            next: (end < total).then(|| end.to_string()),
+            pictures: self.page_pictures(wanted).await,
+        })
+    }
+
+    /// What is kept of what a page shows.
+    async fn page_pictures(
+        &self,
+        wanted: Vec<(RepositoryId, std::sync::Arc<Index>, FilePath)>,
+    ) -> Vec<PagePicture> {
+        let found: Vec<_> = futures::stream::iter(wanted)
+            .map(|(repository, index, path)| async move {
+                let key = index.picture_key(path.as_str())?;
+                Some((repository, path, self.pictures.get(&key).await?))
+            })
+            .buffered(READS_AT_ONCE)
+            .collect()
+            .await;
+        let mut left = MOST_PAGE_BYTES;
+        found
+            .into_iter()
+            .flatten()
+            .filter_map(|(repository, path, kept)| {
+                let (media_type, data) = match kept {
+                    Kept::Nothing => (None, None),
+                    Kept::Picture { media_type, data } => {
+                        left = left.checked_sub(data.len())?;
+                        (Some(media_type), Some(data))
+                    }
+                };
+                Some(PagePicture {
+                    repository,
+                    path,
+                    media_type,
+                    data,
+                })
+            })
+            .collect()
+    }
+
     /// What shows each folder on its card, which this server decides, so a page never searches.
     async fn covers(
         &self,
@@ -146,14 +297,48 @@ impl LoreMcp {
                 "at most {MOST_AT_ONCE} folders at a time"
             )));
         }
-        let branch = match request.branch {
-            Some(branch) => branch,
-            None => BranchName::parse(DEFAULT_BRANCH).expect("the default branch's name"),
-        };
+        let branch = branch_or_default(request.branch);
         let reader = self.reader(&context)?;
-        Ok(Covers {
-            covers: covers::covers(&reader, &self.covers, &branch, request.folders).await,
-        })
+        let reader = &reader;
+        let branch = &branch;
+        let covers = futures::stream::iter(request.folders)
+            .map(|folder| async move {
+                // A cover is decoration: what could not be read now shows its icon.
+                let Ok(index) = self
+                    .indexes
+                    .at_tip(reader, &folder.repository, branch)
+                    .await
+                else {
+                    return Cover::default();
+                };
+                let at = folder.path.as_ref().map_or("", FilePath::as_str);
+                Cover {
+                    files: files(&index.cover_of(at)),
+                }
+            })
+            .buffered(READS_AT_ONCE)
+            .collect()
+            .await;
+        Ok(Covers { covers })
+    }
+
+    /// Keeps what the Thumb server answered of a repository's small pictures, under what they show
+    /// at the tip.
+    async fn keep(
+        &self,
+        reader: &Reader,
+        repository: &RepositoryId,
+        branch: &BranchName,
+        kept: Vec<(FilePath, Kept)>,
+    ) {
+        let Ok(index) = self.indexes.at_tip(reader, repository, branch).await else {
+            return;
+        };
+        for (path, kept) in kept {
+            if let Some(key) = index.picture_key(path.as_str()) {
+                self.pictures.keep(&key, &kept).await;
+            }
+        }
     }
 
     /// What is ready of many files by one request, from the Thumb server, which reads them as the
@@ -190,6 +375,25 @@ impl LoreMcp {
             })
             .await
             .map_err(|error| ToolError::Rejected(format!("reading the files: {error}")))?;
+        if request.size == ThumbnailSize::Small {
+            let reader = self.reader(&context)?;
+            let mut by_place: std::collections::BTreeMap<_, Vec<_>> =
+                std::collections::BTreeMap::new();
+            for (file, one) in request.files.iter().zip(&ready.thumbnails) {
+                if !one.pending {
+                    by_place
+                        .entry((file.repository.clone(), file.branch.clone()))
+                        .or_default()
+                        .push((
+                            file.path.clone(),
+                            kept_of(one.media_type.clone(), one.data.clone()),
+                        ));
+                }
+            }
+            for ((repository, branch), kept) in by_place {
+                self.keep(&reader, &repository, &branch, kept).await;
+            }
+        }
         Ok(FileThumbnails {
             thumbnails: ready
                 .thumbnails
@@ -231,10 +435,57 @@ impl LoreMcp {
             .call(asked)
             .await
             .map_err(|error| ToolError::Rejected(format!("reading the file: {error}")))?;
+        if request.size == ThumbnailSize::Small {
+            let kept = kept_of(drawn.media_type.clone(), drawn.data.clone());
+            self.keep(
+                &self.reader(&context)?,
+                &request.repository,
+                &request.branch,
+                vec![(request.path.clone(), kept)],
+            )
+            .await;
+        }
         Ok(FileThumbnail {
             media_type: drawn.media_type,
             data: drawn.data,
         })
+    }
+}
+
+fn branch_or_default(branch: Option<BranchName>) -> BranchName {
+    branch.unwrap_or_else(|| BranchName::parse(DEFAULT_BRANCH).expect("the default branch's name"))
+}
+
+fn files(paths: &[String]) -> Vec<FilePath> {
+    paths
+        .iter()
+        .filter_map(|path| FilePath::parse(path.as_str()).ok())
+        .collect()
+}
+
+fn browse_item(item: &Item) -> BrowseItem {
+    BrowseItem {
+        name: item.name.clone(),
+        repository: None,
+        path: FilePath::parse(item.path.as_str()).ok(),
+        entry_type: match item.kind {
+            EntryKind::File => EntryType::File,
+            EntryKind::Directory => EntryType::Directory,
+            EntryKind::Link => EntryType::Link,
+        },
+        size: item.size,
+        stage: item
+            .stage
+            .as_deref()
+            .and_then(|stage| FilePath::parse(stage).ok()),
+        cover: (item.kind == EntryKind::Directory).then(|| files(&item.cover)),
+    }
+}
+
+fn kept_of(media_type: Option<String>, data: Option<String>) -> Kept {
+    match (media_type, data) {
+        (Some(media_type), Some(data)) => Kept::Picture { media_type, data },
+        _ => Kept::Nothing,
     }
 }
 
@@ -271,6 +522,11 @@ static ROUTES: LazyLock<Routes<LoreMcp>> = LazyLock::new(|| {
             policy(),
             |domain, request, context| async move { domain.thumbnail(request, context).await },
         )
+        .tool::<BrowseRequest, _, _>(
+            "One page of the repositories you can read or of what a repository holds, or of what is named by `search` at any depth, with the pictures of what is on it that are ready. A folder with exactly one stage in it names that stage.",
+            policy(),
+            |domain, request, context| async move { domain.browse(request, context).await },
+        )
         .tool::<CoversRequest, _, _>(
             "What shows each of many folders on its card: at most four files, or none.",
             policy(),
@@ -292,6 +548,7 @@ static ROUTES: LazyLock<Routes<LoreMcp>> = LazyLock::new(|| {
         .app_tools(
             &app(),
             &[
+                BrowseRequest::TOOL,
                 ThumbnailRequest::TOOL,
                 CoversRequest::TOOL,
                 ThumbnailsRequest::TOOL,

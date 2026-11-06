@@ -79,7 +79,8 @@ async fn serve(
             .context("serving requires a Hub issuer")?,
         http.clone(),
     )?;
-    let domain = LoreMcp::new(hub).context("assembling the App's document")?;
+    let domain = LoreMcp::new(hub, args.picture_directory.clone())
+        .context("assembling the App's document")?;
     let hosted = HostedServer::for_domain::<LoreMcp>()
         .deployment(deployment, args.allow_loopback_hosts)?
         .allowed_hosts(args.allowed_hosts.iter().cloned())

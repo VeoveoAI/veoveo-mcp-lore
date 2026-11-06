@@ -9,9 +9,10 @@ mod permissions;
 mod resource;
 
 pub use files::{
-    Cover, Covers, CoversRequest, DEFAULT_BRANCH, EntryType, FileEntry, FileListing, FileRef,
-    FileThumbnail, FileThumbnails, FolderRef, ListFilesRequest, MOST_AT_ONCE, ReadyThumbnail,
-    RepositorySummary, ThumbnailRequest, ThumbnailSize, ThumbnailsRequest,
+    Browse, BrowseItem, BrowseRequest, Cover, Covers, CoversRequest, DEFAULT_BRANCH, EntryType,
+    FileEntry, FileListing, FileRef, FileThumbnail, FileThumbnails, FolderRef, ListFilesRequest,
+    MOST_AT_ONCE, MOST_ON_A_PAGE, PagePicture, ReadyThumbnail, RepositorySummary, ThumbnailRequest,
+    ThumbnailSize, ThumbnailsRequest,
 };
 pub use ids::{BranchName, FilePath, LoreIdError, RepositoryId};
 pub use permissions::{LorePermission, LoreScope};

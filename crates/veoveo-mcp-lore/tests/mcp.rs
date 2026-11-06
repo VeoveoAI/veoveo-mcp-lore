@@ -18,7 +18,11 @@ fn hub(granted: &[LorePermission]) -> TestHub {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let http = reqwest::Client::builder().build().unwrap();
     let hub = Hub::new(&url::Url::parse("http://127.0.0.1:9/").unwrap(), http).unwrap();
-    let domain = LoreMcp::new(hub).unwrap();
+    let domain = LoreMcp::new(
+        hub,
+        std::env::temp_dir().join(format!("veoveo-lore-pictures-{}", std::process::id())),
+    )
+    .unwrap();
     TestHub::new(
         testing::for_domain::<LoreMcp>()
             .handler(move || Hosted::new(domain.clone()))
@@ -38,7 +42,10 @@ async fn tools_are_listed_with_their_permission() {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         names.sort_unstable();
-        assert_eq!(names, ["covers", "list_files", "thumbnail", "thumbnails"]);
+        assert_eq!(
+            names,
+            ["browse", "covers", "list_files", "thumbnail", "thumbnails"]
+        );
 
         let refused = hub(&[])
             .rpc("tools/call", json!({"name": "list_files", "arguments": {}}))
@@ -94,7 +101,7 @@ async fn the_app_is_the_shared_gallery_with_this_servers_adapter() {
         for needle in [
             "ui/initialize",
             "veoveoGallery",
-            "list_files",
+            "\"browse\"",
             "\"thumbnail\"",
             "ui/open-link",
             "\"view\", \"lore\"",
