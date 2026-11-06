@@ -7,6 +7,7 @@ const veoveoViewer = (() => {
   const PICTURE_TIMEOUT = 240000;
   const DRAWN_AT_ONCE = 3;
   const OPEN_AT_ONCE = 6;
+  const FIRST_OF_MANY = 2;
   const VIEWS = {
     activity: "Activity",
     repositories: "Repositories",
@@ -261,10 +262,10 @@ const veoveoViewer = (() => {
     }
     return out;
   };
-  const diffTable = (patch) => {
+  const diffTable = (patch, oneSided) => {
     const rows = parseDiff(patch);
     const number = (value) => String(value ?? "");
-    if (state.mode === "split") {
+    if (state.mode === "split" && !oneSided) {
       const cell = (row, kind, mid) => (row
         ? [h("td", { class: `no ${kind}${mid ? " mid" : ""}` }, number(row.oldNo ?? row.newNo)), h("td", { class: kind }, row.text)]
         : [h("td", { class: `no blank${mid ? " mid" : ""}` }), h("td", { class: "blank" })]);
@@ -425,15 +426,24 @@ const veoveoViewer = (() => {
     if (set.has(key)) set.delete(key); else set.add(key);
     render();
   };
-  const sideOf = (push, change, label, revision, path, showing, before, after) => {
-    if (!revision) return h("span", { class: "side" }, h("span", { class: "label" }, label), h("span", { class: "blank" }, label === "Before" ? "Didn't exist" : "Removed"));
-    askPicture(push.repository, revision, path, "small");
-    const picture = pictures.get(pictureKey(push.repository, revision, path, "small"));
+  const sideOf = (push, change, label, side, showing, before, after) => {
+    askPicture(push.repository, side.revision, side.path, "small");
+    const picture = pictures.get(pictureKey(push.repository, side.revision, side.path, "small"));
     return h("button", { class: "side", type: "button", disabled: !picture?.url, on: { click: () => look(push, change.path, before, after, showing) } },
       h("span", { class: "label" }, label),
       picture?.url
         ? h("img", { src: picture.url, alt: `${label}: ${change.path}` })
-        : picture?.url === null ? h("span", { class: "blank" }, "No picture") : h("span", { class: "drawing", "aria-label": "Drawing" }));
+        : h("span", { class: "drawing", "aria-label": "Drawing" }));
+  };
+  // What was added or removed has one picture, and a file nothing can draw says so in a line.
+  const picturesOf = (push, change, before, after) => {
+    const sides = [["Before", before, "before"], ["After", after, "after"]].filter(([, side]) => side);
+    const drawn = sides.map(([, side]) => {
+      askPicture(push.repository, side.revision, side.path, "small");
+      return pictures.get(pictureKey(push.repository, side.revision, side.path, "small"));
+    });
+    if (drawn.every((picture) => picture && picture.url === null)) return h("div", { class: "note-row" }, "No picture of this file.");
+    return h("div", { class: "pair" }, sides.map(([label, side, showing]) => sideOf(push, change, label, side, showing, before, after)));
   };
   const fileChange = (push, change, against, open) => {
     const key = change.path;
@@ -448,20 +458,16 @@ const veoveoViewer = (() => {
       if (diff.answer.binary) return h("div", { class: "note-row" }, "Binary file. No text to compare.");
       if (diff.answer.tooLarge) return h("div", { class: "note-row" }, "Too large to compare here.");
       if (!diff.answer.patch || !diff.answer.patch.includes("@@")) return h("div", { class: "note-row" }, change.fromPath ? `From ${change.fromPath}. Same content.` : "Same content.");
-      return diffTable(diff.answer.patch);
+      return diffTable(diff.answer.patch, change.action === "added" || change.action === "removed");
     };
     if (open) {
       if (showsPicture(change.path)) {
-        body.push(h("div", { class: "pair" },
-          sideOf(push, change, "Before", before?.revision, before?.path, "before", before, after),
-          sideOf(push, change, "After", after?.revision, after?.path, "after", before, after)));
+        body.push(picturesOf(push, change, before, after));
         if (hasText(change.path)) {
           const showText = state.showText.has(key);
           body.push(h("button", { class: "text-toggle", type: "button", on: { click: () => toggle(state.showText, key) } }, `${showText ? "▾" : "▸"} Text`));
           if (showText) body.push(textOf());
         }
-      } else if (change.action === "moved" || change.action === "copied") {
-        body.push(textOf());
       } else {
         body.push(textOf());
       }
@@ -483,7 +489,7 @@ const veoveoViewer = (() => {
   };
   const linkHead = (change, open, right) => [
     h("span", { class: "chev" }, open === null ? "" : open ? "▾" : "▸"),
-    h("span", { class: "tag moved" }, change.action === "changed" ? "Moved" : change.action[0].toUpperCase() + change.action.slice(1)),
+    h("span", { class: `tag ${change.action === "changed" ? "moved" : change.action}` }, change.action === "changed" ? "Moved" : change.action[0].toUpperCase() + change.action.slice(1)),
     h("span", { class: "link-icon" }, (() => {
       const holder = document.createElement("template");
       holder.innerHTML = LINK_ICON;
@@ -497,20 +503,24 @@ const veoveoViewer = (() => {
     if (!change.link?.reached) {
       return h("div", { class: "change" }, h("div", { class: "change-head", style: "cursor: default" }, linkHead(change, null, h("span", { class: "tag quiet-tag" }, "No grant"))));
     }
+    // Only a move brought pushes in: a link added or removed names one revision.
+    const asked = change.action === "changed" && change.link.to && change.link.from && change.link.repository
+      ? `${change.link.repository}\0${change.link.to}\0${change.link.from}` : null;
+    if (!asked) {
+      return h("div", { class: "change" }, h("div", { class: "change-head", style: "cursor: default" }, linkHead(change, null, change.link.tracking ? h("span", { class: "movement" }, "Follows its branch") : null)));
+    }
     const key = `link:${change.path}`;
     const open = !state.closed.has(key);
-    const asked = change.link.to && change.link.repository ? `${change.link.repository}\0${change.link.to}\0${change.link.from || ""}` : null;
     if (open && asked && !linkPushes.has(asked)) {
       const entry = { answer: undefined };
       linkPushes.set(asked, entry);
-      const request = { repository: change.link.repository, to: change.link.to };
-      if (change.link.from) request.from = change.link.from;
+      const request = { repository: change.link.repository, to: change.link.to, from: change.link.from };
       veoveoApp.tool("link_pushes", request, 90000)
         .then((answer) => { entry.answer = answer; })
         .catch(() => { entry.answer = { pushes: [] }; })
         .finally(render);
     }
-    const answer = asked ? linkPushes.get(asked)?.answer : null;
+    const answer = linkPushes.get(asked)?.answer;
     const count = answer ? h("span", { class: "movement" }, plural(answer.pushes.length, "push").replace("pushs", "pushes") + (answer.truncated ? "+" : "")) : null;
     return h("div", { class: "change" },
       h("button", { class: "change-head", type: "button", "aria-expanded": open ? "true" : "false", on: { click: () => toggle(state.closed, key) } }, linkHead(change, open, count)),
@@ -548,7 +558,9 @@ const veoveoViewer = (() => {
       ...list.filter((change) => change.type === "link"),
       ...list.filter((change) => change.type === "file" && !showsPicture(change.path)),
     ];
-    const opened = (change, index) => index < OPEN_AT_ONCE && !state.closed.has(change.path);
+    // A small push opens whole and a large one is a list to open from; a click turns either over.
+    const openFirst = sorted.length <= OPEN_AT_ONCE ? OPEN_AT_ONCE : FIRST_OF_MANY;
+    const opened = (change, index) => (index < openFirst) !== state.closed.has(change.path);
     return h("div", { class: "pane", id: "viewer-pane" },
       h("div", {},
         h("h2", {}, titleOf(push.message)),

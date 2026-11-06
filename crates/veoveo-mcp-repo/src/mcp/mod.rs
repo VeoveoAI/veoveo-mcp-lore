@@ -653,22 +653,22 @@ impl RepoMcp {
                 ));
             }
         }
-        let factory = reader
-            .factory()
-            .await
+        let (factory, listed) = tokio::join!(
+            reader.factory(),
+            futures::stream::iter(repositories)
+                .map(|repository| {
+                    let reader = reader.clone();
+                    async move {
+                        let branches = reader.branches(&repository.id).await;
+                        (repository, branches)
+                    }
+                })
+                .buffer_unordered(PUSH_READS_AT_ONCE)
+                .collect::<Vec<_>>(),
+        );
+        let factory = factory
             .inspect_err(|error| tracing::warn!(%error, "the factory could not be read"))
             .ok();
-        let listed = futures::stream::iter(repositories)
-            .map(|repository| {
-                let reader = reader.clone();
-                async move {
-                    let branches = reader.branches(&repository.id).await;
-                    (repository, branches)
-                }
-            })
-            .buffer_unordered(PUSH_READS_AT_ONCE)
-            .collect::<Vec<_>>()
-            .await;
         let mut places = Vec::new();
         let mut all_of_the_repository = Vec::new();
         for (repository, branches) in listed {
