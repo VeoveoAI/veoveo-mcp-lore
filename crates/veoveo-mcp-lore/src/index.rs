@@ -298,6 +298,11 @@ impl Index {
         found
     }
 
+    /// A file's content alone, for showing the last picture of a stage until its tip's is asked for.
+    pub fn content_key(&self, path: &str) -> Option<String> {
+        self.addresses.get(path).cloned()
+    }
+
     /// What names what a file's picture shows: its content, and for a stage that is not a package
     /// the revision too, since it may name other files. None for a name the index does not hold.
     pub fn picture_key(&self, path: &str) -> Option<String> {

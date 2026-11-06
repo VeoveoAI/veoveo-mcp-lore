@@ -365,8 +365,7 @@ impl LoreMcp {
                     missed.store(true, Ordering::Relaxed);
                     return Ok(());
                 }
-                self.pictures
-                    .keep(&key, &kept_of(answer.media_type, answer.data))
+                self.keep_for(index, &path, &kept_of(answer.media_type, answer.data))
                     .await;
                 Ok(())
             })
@@ -382,7 +381,16 @@ impl LoreMcp {
         let found: Vec<_> = futures::stream::iter(wanted)
             .map(|(repository, index, path)| async move {
                 let key = index.picture_key(path.as_str())?;
-                Some((repository, path, self.pictures.get(&key).await?))
+                let kept = match self.pictures.get(&key).await {
+                    Some(kept) => kept,
+                    // The stage's last picture, until drawing ahead asks about this tip.
+                    None => {
+                        self.pictures
+                            .get(&index.content_key(path.as_str())?)
+                            .await?
+                    }
+                };
+                Some((repository, path, kept))
             })
             .buffered(READS_AT_ONCE)
             .collect()
@@ -445,6 +453,16 @@ impl LoreMcp {
         Ok(Covers { covers })
     }
 
+    /// Keeps a picture under what it shows at this revision, and by content alone for later ones.
+    async fn keep_for(&self, index: &Index, path: &str, kept: &Kept) {
+        if let Some(key) = index.picture_key(path) {
+            self.pictures.keep(&key, kept).await;
+        }
+        if let (Some(key), Kept::Picture { .. }) = (index.content_key(path), kept) {
+            self.pictures.keep(&key, kept).await;
+        }
+    }
+
     /// Keeps what the Thumb server answered of a repository's small pictures, under what they show
     /// at the tip.
     async fn keep(
@@ -458,9 +476,7 @@ impl LoreMcp {
             return;
         };
         for (path, kept) in kept {
-            if let Some(key) = index.picture_key(path.as_str()) {
-                self.pictures.keep(&key, &kept).await;
-            }
+            self.keep_for(&index, path.as_str(), &kept).await;
         }
     }
 
