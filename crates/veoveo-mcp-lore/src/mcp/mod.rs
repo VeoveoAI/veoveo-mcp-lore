@@ -3,9 +3,12 @@ mod declarations;
 mod requirements;
 mod setup;
 
-use futures::StreamExt as _;
+use futures::{StreamExt as _, TryStreamExt as _};
 use rmcp::{ErrorData as McpError, RoleServer, service::RequestContext};
-use std::sync::LazyLock;
+use std::{
+    collections::HashSet,
+    sync::{Arc, LazyLock, Mutex},
+};
 use veoveo_hub_sdk::{
     apps::{AppHtml, AppUri, UiVisibility},
     calls::ToolCall,
@@ -47,6 +50,8 @@ const READS_AT_ONCE: usize = 8;
 /// The most base64 one page answers, well inside an MCP response. A page's other pictures are asked
 /// for afterwards.
 const MOST_PAGE_BYTES: usize = 3 * 1024 * 1024;
+/// How many pictures are drawn ahead at once.
+const DRAWN_AHEAD: usize = 4;
 /// What the App adds to the gallery.
 const APP_ADAPTER: &str = include_str!("../../assets/repositories.js");
 
@@ -65,6 +70,14 @@ pub struct LoreMcp {
     app: AppHtml,
     indexes: Indexes,
     pictures: Pictures,
+    filling: Arc<Mutex<Filling>>,
+}
+
+/// Which revisions' pictures are being drawn ahead, and which are done.
+#[derive(Default)]
+struct Filling {
+    running: HashSet<(RepositoryId, String)>,
+    finished: HashSet<(RepositoryId, String)>,
 }
 
 impl LoreMcp {
@@ -75,6 +88,7 @@ impl LoreMcp {
             app: app_document()?,
             indexes: Indexes::default(),
             pictures: Pictures::new(pictures)?,
+            filling: Arc::default(),
         })
     }
 
@@ -170,6 +184,7 @@ impl LoreMcp {
             .as_deref()
             .map(str::trim)
             .filter(|search| !search.is_empty());
+        let mut filling = false;
         let (items, total, wanted) = match request.repository {
             None => {
                 let mut repositories = reader
@@ -215,6 +230,7 @@ impl LoreMcp {
                     .at_tip(&reader, &repository, &branch)
                     .await
                     .map_err(|error| refused("reading the repository", &error))?;
+                filling = self.fill(&reader, &repository, &branch, &index);
                 let folder = request.path.as_ref().map_or("", FilePath::as_str);
                 let page = match search {
                     Some(search) => index.search(folder, search, offset, limit),
@@ -248,13 +264,109 @@ impl LoreMcp {
             total: total as u64,
             next: (end < total).then(|| end.to_string()),
             pictures: self.page_pictures(wanted).await,
+            filling,
         })
+    }
+
+    /// Draws what a gallery of this revision will ask for, ahead of anyone asking, as the person
+    /// browsing, so Lore and each server's rules still decide. It lasts as long as their token: a
+    /// later request of anyone browsing starts it again from what is not kept yet. Says whether it
+    /// is under way.
+    fn fill(
+        &self,
+        reader: &Reader,
+        repository: &RepositoryId,
+        branch: &BranchName,
+        index: &Arc<Index>,
+    ) -> bool {
+        let Some(revision) = index.revision() else {
+            return false;
+        };
+        let key = (repository.clone(), revision.to_owned());
+        {
+            let mut filling = self.filling.lock().unwrap_or_else(|held| held.into_inner());
+            if filling.finished.contains(&key) {
+                return false;
+            }
+            if !filling.running.insert(key.clone()) {
+                return true;
+            }
+        }
+        let (domain, reader, repository, branch, index) = (
+            self.clone(),
+            reader.clone(),
+            repository.clone(),
+            branch.clone(),
+            index.clone(),
+        );
+        tokio::spawn(async move {
+            let done = domain
+                .draw_ahead(&reader, &repository, &branch, &index)
+                .await;
+            let mut filling = domain
+                .filling
+                .lock()
+                .unwrap_or_else(|held| held.into_inner());
+            filling.running.remove(&key);
+            if done {
+                filling.finished.insert(key);
+            }
+        });
+        true
+    }
+
+    /// Whether everything got an answer. A failed call ends it: the token has likely run out.
+    async fn draw_ahead(
+        &self,
+        reader: &Reader,
+        repository: &RepositoryId,
+        branch: &BranchName,
+        index: &Index,
+    ) -> bool {
+        let drawn = futures::stream::iter(index.pictured().into_iter().map(Ok::<_, ()>))
+            .try_for_each_concurrent(DRAWN_AHEAD, |path| async move {
+                let (Some(key), Ok(file)) = (
+                    index.picture_key(&path),
+                    thumb::FilePath::parse(path.as_str()),
+                ) else {
+                    return Ok(());
+                };
+                if self.pictures.get(&key).await.is_some() {
+                    return Ok(());
+                }
+                let (Ok(from), Ok(on)) = (
+                    thumb::RepositoryId::parse(repository.as_str()),
+                    thumb::BranchName::parse(branch.as_str()),
+                ) else {
+                    return Err(());
+                };
+                let answer = reader
+                    .client
+                    .call(thumb::ThumbnailRequest {
+                        source: thumb::FileSource::Lore {
+                            repository: from,
+                            branch: on,
+                            path: file,
+                        },
+                        size: thumb::ThumbnailSize::Small,
+                    })
+                    .await
+                    .map_err(|error| {
+                        tracing::debug!(%error, "a picture was not drawn ahead");
+                    })?;
+                self.pictures
+                    .keep(&key, &kept_of(answer.media_type, answer.data))
+                    .await;
+                Ok(())
+            })
+            .await;
+        drawn.is_ok()
     }
 
     /// What is kept of what a page shows.
     async fn page_pictures(
         &self,
-        wanted: Vec<(RepositoryId, std::sync::Arc<Index>, FilePath)>,
+        wanted: Vec<(RepositoryId, Arc<Index>, FilePath)>,
     ) -> Vec<PagePicture> {
         let found: Vec<_> = futures::stream::iter(wanted)
             .map(|(repository, index, path)| async move {

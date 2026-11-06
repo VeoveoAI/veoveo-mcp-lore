@@ -63,6 +63,19 @@ veoveoGallery((ui) => {
     };
   };
 
+  // While the server is drawing a repository's pictures ahead, an open page keeps it company, since
+  // the drawing lasts only as long as someone's last request. A hidden page does not.
+  let company = null;
+  const keepCompany = (at, filling) => {
+    clearTimeout(company);
+    if (!at || !filling) return;
+    company = setTimeout(async () => {
+      if (document.visibilityState !== "visible") return keepCompany(at, true);
+      const page = await ui.tool("browse", { repository: at.repository.id, branch: BRANCH, limit: 1 }).catch(() => ({ filling: true }));
+      keepCompany(at, page.filling);
+    }, 30000);
+  };
+
   const trailOf = (at) => {
     const trail = [{ label: "Repositories", at: null }, { label: at.repository.name, at: { repository: at.repository, folders: [] } }];
     at.folders.forEach((folder, index) => {
@@ -85,6 +98,7 @@ veoveoGallery((ui) => {
       if (search) asked.search = search;
       if (cursor) asked.cursor = cursor;
       const page = await ui.tool("browse", asked);
+      keepCompany(at, page.filling);
       return {
         items: at ? page.items.map((entry) => itemOf(at.repository, entry)) : page.items.map(repositoryItem),
         next: page.next,

@@ -171,10 +171,28 @@ impl Index {
                     _ => {}
                 }
             }
+            // A stage named for its folder is the folder's root, whatever other layers lie beside it.
+            let name = path.rsplit('/').next().unwrap_or_default();
+            let root = folder
+                .children
+                .iter()
+                .find(|child| {
+                    child.kind == EntryKind::File
+                        && is_stage(&child.name)
+                        && child
+                            .name
+                            .rsplit_once('.')
+                            .is_some_and(|(stem, _)| stem == name)
+                })
+                .map(|child| child.path.clone());
+            if let Some(root) = &root {
+                cover.retain(|path| path != root);
+                cover.insert(0, root.clone());
+            }
             cover.truncate(MOST_COVER);
             folder.cover = cover;
-            folder.stages = stages;
-            folder.only_stage = only_stage.filter(|_| stages == 1);
+            folder.stages = if root.is_some() { 1 } else { stages };
+            folder.only_stage = root.or(only_stage.filter(|_| stages == 1));
             folders.insert(path, folder);
         }
         Self {
@@ -252,6 +270,32 @@ impl Index {
             }
         }
         Some((items, found))
+    }
+
+    /// What a gallery of this revision will ask a picture of: each object's stage, and every file
+    /// that shows something and is in no object.
+    pub fn pictured(&self) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut stack: Vec<&Folder> = self.folders.get("").into_iter().collect();
+        while let Some(here) = stack.pop() {
+            for child in &here.children {
+                match child.kind {
+                    EntryKind::File if rank(&child.name).is_some() => {
+                        found.push(child.path.clone())
+                    }
+                    EntryKind::Directory => {
+                        if let Some(inside) = self.folders.get(&child.path) {
+                            match &inside.only_stage {
+                                Some(stage) => found.push(stage.clone()),
+                                None => stack.push(inside),
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        found
     }
 
     /// What names what a file's picture shows: its content, and for a stage that is not a package
@@ -393,6 +437,39 @@ mod tests {
         assert_eq!(
             top.iter().find(|item| item.name == "src").unwrap().stage,
             None
+        );
+    }
+
+    #[test]
+    fn a_stage_named_for_its_folder_is_its_root_beside_other_layers() {
+        use EntryKind::{Directory as D, File as F};
+        let index = Index::build(
+            [
+                ("franka", D),
+                ("franka/arm.usd", F),
+                ("franka/franka.usd", F),
+                ("franka/hand.usd", F),
+            ]
+            .map(|(path, kind)| entry(path, kind))
+            .into(),
+            None,
+        );
+        let (top, _) = index.page("", 0, 10).unwrap();
+        assert_eq!(top[0].stage.as_deref(), Some("franka/franka.usd"));
+        assert_eq!(index.cover_of("franka")[0], "franka/franka.usd");
+        assert_eq!(index.pictured(), ["franka/franka.usd"]);
+    }
+
+    #[test]
+    fn what_is_pictured_is_each_objects_stage_and_what_shows_outside_objects() {
+        let mut pictured = dataset().pictured();
+        pictured.sort();
+        assert_eq!(
+            pictured,
+            [
+                "rigid/kitchen/R001_microwave/01_compact/physx/model.usdc",
+                "rigid/kitchen/R001_microwave/02_steel/physx/model.usdc",
+            ]
         );
     }
 

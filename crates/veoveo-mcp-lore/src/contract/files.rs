@@ -169,6 +169,10 @@ pub struct Browse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
     pub pictures: Vec<PagePicture>,
+    /// The repository's pictures are being drawn ahead of anyone asking, for as long as someone
+    /// keeps browsing it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub filling: bool,
 }
 
 /// A folder of a repository; none is its top.

@@ -56,7 +56,7 @@ revision and needs no further read of Lore:
 
 - **A folder's cover:** pictures of what it holds at any depth, a stage first, then one from each folder inside, leaving out text and code, which would
   show as small print.
-- **An object:** a folder with exactly one stage in it, at any depth, is one object known by the folder's name, whatever the stage's file is called. It
+- **An object:** a folder with exactly one stage in it, at any depth, or with a stage named for it beside other layers, is one object known by the folder's name, whatever the stage's file is called. It
   shows and opens that stage, and its closer look leads into its files.
 - **A page and a search:** `browse` answers 60 items at a time, and `search` finds names at any depth, stopping at an object.
 
@@ -66,7 +66,7 @@ the whole tree again. A page of repositories reads none of them: it shows what w
 
 Pictures come with the page. `thumbnails` and `thumbnail` keep each small picture the Thumb server answers, on disk, under what it shows: the file's
 content address, and for a stage that is not a package the revision too, since it may name other files. `browse` answers from what is kept, up to 3 MiB a
-page, and the page asks for the rest. A file with no picture is believed for an hour, since that may mean a draw failed. A page names only what its person's read listed, so what is kept reaches no one else, and any of it can be fetched again.
+page, and the page asks for the rest. While someone browses a repository, this server also draws what a gallery of its tip will ask for: each object's stage and every file outside an object that shows something, four at a time. It does so as that person, so Lore's and each server's rules still decide, and it lasts as long as their token. An open page asks again every 30 seconds while `browse` says `filling`, and any later request starts it again from what is not kept yet, so nobody runs anything for a repository to get its pictures. A file with no picture is believed for an hour, since that may mean a draw failed. A page names only what its person's read listed, so what is kept reaches no one else, and any of it can be fetched again.
 
 It shows `main`. A branch is a tool argument, not yet a choice in the App.
 
