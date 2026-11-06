@@ -14,6 +14,8 @@ use crate::contract::{BranchName, FilePath, RepositoryId};
 
 /// How long a listing may take.
 const LISTING_TIMEOUT: Duration = Duration::from_secs(30);
+/// The header that names the revision a read was made at.
+const REVISION: &str = "lore-revision";
 
 /// The Hub at the origin of its issuer.
 #[derive(Clone)]
@@ -78,10 +80,12 @@ struct Repositories {
     repositories: Vec<Repository>,
 }
 
-/// What a folder holds.
+/// What a folder holds, and the revision of the branch it was read at, when it has one.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Listing {
     pub entries: Vec<Entry>,
+    #[serde(skip)]
+    pub revision: Option<String>,
 }
 
 /// One name in a folder.
@@ -100,6 +104,12 @@ pub enum EntryKind {
     File,
     Directory,
     Link,
+}
+
+/// A successful answer of the Hub.
+struct Answer {
+    body: Vec<u8>,
+    revision: Option<String>,
 }
 
 /// The Hub, for one caller at one profile.
@@ -136,7 +146,7 @@ impl Hub {
 }
 
 impl Reader {
-    async fn get(&self, url: url::Url) -> Result<Vec<u8>, HubError> {
+    async fn get(&self, url: url::Url) -> Result<Answer, HubError> {
         let bearer = self.client.hub_bearer().await?;
         let response = self
             .hub
@@ -147,9 +157,17 @@ impl Reader {
             .send()
             .await?;
         let status = response.status();
+        let revision = response
+            .headers()
+            .get(REVISION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         let body = response.bytes().await?;
         if status.is_success() {
-            return Ok(body.to_vec());
+            return Ok(Answer {
+                body: body.to_vec(),
+                revision,
+            });
         }
         Err(HubError::Answered {
             status,
@@ -162,8 +180,8 @@ impl Reader {
         let url = self
             .hub
             .route(["lore", self.profile.as_str(), "repositories"]);
-        let body = self.get(url).await?;
-        Ok(serde_json::from_slice::<Repositories>(&body)?.repositories)
+        let answer = self.get(url).await?;
+        Ok(serde_json::from_slice::<Repositories>(&answer.body)?.repositories)
     }
 
     /// A folder's listing; the Hub takes a trailing `/` for a folder.
@@ -186,8 +204,11 @@ impl Reader {
             .chain(folder.into_iter().flat_map(FilePath::segments))
             .chain([""]),
         );
-        let body = self.get(url).await?;
-        Ok(serde_json::from_slice(&body)?)
+        let answer = self.get(url).await?;
+        Ok(Listing {
+            revision: answer.revision,
+            ..serde_json::from_slice(&answer.body)?
+        })
     }
 }
 

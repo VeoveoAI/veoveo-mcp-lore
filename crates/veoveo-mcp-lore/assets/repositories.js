@@ -29,13 +29,12 @@ veoveoGallery((ui) => {
     if (entry.type === "link") {
       return { key, name: entry.name, kind: "link", about: "Linked repository", disabled: true };
     }
-    const kind = ui.kindOf(entry.name);
     return {
       key,
       name: entry.name,
-      kind,
-      about: [ui.size(entry.size), ui.labelOf(kind)].filter(Boolean).join(" · "),
-      detail: [ui.labelOf(kind), ui.size(entry.size), `${repository.name}/${path}`].filter(Boolean).join(" · "),
+      kind: ui.kindOf(entry.name),
+      about: ui.size(entry.size),
+      fields: { repository, branch: BRANCH, path, type: entry.type, size: entry.size },
       repository,
       path,
     };
@@ -48,18 +47,6 @@ veoveoGallery((ui) => {
     });
     return trail;
   };
-
-  // Pictures for a folder's card: what looks like something, first what it holds and then a file
-  // from each folder inside. Text and code would show as pages of small print, and a folder of
-  // them is better shown by its icon.
-  const RANK = { image: 0, video: 0, scene: 0, model: 1, document: 2 };
-  const DOCUMENTS = ["pdf", "doc", "docx", "odt", "xls", "xlsx", "ods", "ppt", "pptx", "odp"];
-  const looksLikeSomething = (item) => item.path && item.kind in RANK
-    && (item.kind !== "document" || DOCUMENTS.includes(ui.extensionOf(item.name)));
-  const usable = (repository, folders, entries) => entries
-    .map((entry) => itemOf(repository, folders, entry))
-    .filter(looksLikeSomething)
-    .sort((a, b) => RANK[a.kind] - RANK[b.kind]);
 
   return {
     title: "Repositories",
@@ -80,17 +67,24 @@ veoveoGallery((ui) => {
       };
     },
     enter: (item) => ({ repository: item.repository, folders: item.folders }),
-    cover: async (item) => {
-      const entries = await listed(item.repository, item.folders);
-      const found = usable(item.repository, item.folders, entries);
-      for (const entry of entries.filter((one) => one.type === "directory").slice(0, 6)) {
-        if (found.length >= 4) break;
-        const folders = [...item.folders, entry.name];
-        const first = usable(item.repository, folders, await listed(item.repository, folders))[0];
-        if (first) found.push(first);
-      }
-      return found;
+    // The server says what shows each folder.
+    covers: async (items) => {
+      const { covers } = await ui.tool("covers", {
+        branch: BRANCH,
+        folders: items.map((item) => (item.folders.length
+          ? { repository: item.repository.id, path: item.folders.join("/") }
+          : { repository: item.repository.id })),
+      });
+      return items.map((item, index) => (covers[index]?.files || []).map((path) => ({
+        key: `${item.repository.id}\0${path}`,
+        repository: item.repository,
+        path,
+      })));
     },
+    thumbnails: async (items, size) => (await ui.tool("thumbnails", {
+      files: items.map((item) => ({ repository: item.repository.id, branch: BRANCH, path: item.path })),
+      size,
+    }, ui.PICTURE_TIMEOUT)).thumbnails,
     thumbnail: (item, size) => ui.tool("thumbnail", { repository: item.repository.id, branch: BRANCH, path: item.path, size }, ui.PICTURE_TIMEOUT),
     open: (item) => viewUrl(item.repository.id, item.path),
   };

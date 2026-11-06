@@ -1,4 +1,4 @@
-//! The tools: what a repository holds, and a picture of one of its files.
+//! The tools: what a repository holds, what shows a folder, and pictures of its files.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -91,6 +91,88 @@ pub struct ThumbnailRequest {
     pub path: FilePath,
     #[serde(default)]
     pub size: ThumbnailSize,
+}
+
+/// The most folders one `covers` names, and files one `thumbnails` names.
+pub const MOST_AT_ONCE: usize = 64;
+
+/// A folder of a repository; none is its top.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FolderRef {
+    pub repository: RepositoryId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<FilePath>,
+}
+
+/// The arguments of `covers`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[veoveo_hub_sdk::tool(provider = LoreProvider, output = Covers, name = "covers")]
+pub struct CoversRequest {
+    /// The branch to read; `main` by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<BranchName>,
+    /// The folders, at most 64.
+    pub folders: Vec<FolderRef>,
+}
+
+/// The files that show one folder: at most four, and none when it holds nothing that looks like
+/// anything.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Cover {
+    pub files: Vec<FilePath>,
+}
+
+/// What `covers` answers, one for each folder, in their order.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(veoveo_hub_sdk::SingleOutput)]
+pub struct Covers {
+    pub covers: Vec<Cover>,
+}
+
+/// A file of a repository, on a branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileRef {
+    pub repository: RepositoryId,
+    pub branch: BranchName,
+    pub path: FilePath,
+}
+
+/// The arguments of `thumbnails`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[veoveo_hub_sdk::tool(provider = LoreProvider, output = FileThumbnails, name = "thumbnails")]
+pub struct ThumbnailsRequest {
+    /// The files, at most 64.
+    pub files: Vec<FileRef>,
+    #[serde(default)]
+    pub size: ThumbnailSize,
+}
+
+/// What is ready of one file: its picture, or none, or `pending` when `thumbnail` has more to say.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadyThumbnail {
+    /// The picture's media type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// The picture, in base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
+}
+
+/// What `thumbnails` answers, one for each file, in their order.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(veoveo_hub_sdk::SingleOutput)]
+pub struct FileThumbnails {
+    pub thumbnails: Vec<ReadyThumbnail>,
 }
 
 /// A file's picture, or none.

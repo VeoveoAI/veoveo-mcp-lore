@@ -17,9 +17,11 @@ use veoveo_mcp_thumb::contract as thumb;
 
 use crate::{
     contract::{
-        BranchName, DEFAULT_BRANCH, EntryType, FileEntry, FileListing, FileThumbnail,
-        ListFilesRequest, LorePermission, RepositorySummary, ThumbnailRequest, ThumbnailSize,
+        BranchName, Covers, CoversRequest, DEFAULT_BRANCH, EntryType, FileEntry, FileListing,
+        FileThumbnail, FileThumbnails, ListFilesRequest, LorePermission, MOST_AT_ONCE,
+        ReadyThumbnail, RepositorySummary, ThumbnailRequest, ThumbnailSize, ThumbnailsRequest,
     },
+    covers::{self, CoverMemory},
     hub::{EntryKind, Hub, HubError, Reader},
 };
 
@@ -50,6 +52,7 @@ pub fn app_document() -> std::io::Result<AppHtml> {
 pub struct LoreMcp {
     hub: Hub,
     app: AppHtml,
+    covers: CoverMemory,
 }
 
 impl LoreMcp {
@@ -57,6 +60,7 @@ impl LoreMcp {
         Ok(Self {
             hub,
             app: app_document()?,
+            covers: CoverMemory::default(),
         })
     }
 
@@ -131,6 +135,74 @@ impl LoreMcp {
         })
     }
 
+    /// What shows each folder on its card, which this server decides, so a page never searches.
+    async fn covers(
+        &self,
+        request: CoversRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Covers, ToolError> {
+        if request.folders.len() > MOST_AT_ONCE {
+            return Err(ToolError::Rejected(format!(
+                "at most {MOST_AT_ONCE} folders at a time"
+            )));
+        }
+        let branch = match request.branch {
+            Some(branch) => branch,
+            None => BranchName::parse(DEFAULT_BRANCH).expect("the default branch's name"),
+        };
+        let reader = self.reader(&context)?;
+        Ok(Covers {
+            covers: covers::covers(&reader, &self.covers, &branch, request.folders).await,
+        })
+    }
+
+    /// What is ready of many files by one request, from the Thumb server, which reads them as the
+    /// same person and draws nothing here.
+    async fn thumbnails(
+        &self,
+        request: ThumbnailsRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<FileThumbnails, ToolError> {
+        if request.files.len() > MOST_AT_ONCE {
+            return Err(ToolError::Rejected(format!(
+                "at most {MOST_AT_ONCE} files at a time"
+            )));
+        }
+        let client = context.client().map_err(|error: McpError| {
+            ToolError::Rejected(format!("no calls for the caller: {}", error.message))
+        })?;
+        let sources = request
+            .files
+            .iter()
+            .map(|file| {
+                Ok(thumb::FileSource::Lore {
+                    repository: thumb::RepositoryId::parse(file.repository.as_str())?,
+                    branch: thumb::BranchName::parse(file.branch.as_str())?,
+                    path: thumb::FilePath::parse(file.path.as_str())?,
+                })
+            })
+            .collect::<Result<Vec<_>, thumb::ThumbIdError>>()
+            .map_err(|error| ToolError::Rejected(error.to_string()))?;
+        let ready = client
+            .call(thumb::ReadyThumbnailsRequest {
+                sources,
+                size: thumb_size(request.size),
+            })
+            .await
+            .map_err(|error| ToolError::Rejected(format!("reading the files: {error}")))?;
+        Ok(FileThumbnails {
+            thumbnails: ready
+                .thumbnails
+                .into_iter()
+                .map(|one| ReadyThumbnail {
+                    media_type: one.media_type,
+                    data: one.data,
+                    pending: one.pending,
+                })
+                .collect(),
+        })
+    }
+
     /// A file's picture, from the Thumb server, which reads the file as the same person. No Thumb
     /// server leaves no picture; a refusal of the file stays a refusal.
     async fn thumbnail(
@@ -153,10 +225,7 @@ impl LoreMcp {
                 path: thumb::FilePath::parse(request.path.as_str())
                     .map_err(|error| parse("the path", &error))?,
             },
-            size: match request.size {
-                ThumbnailSize::Small => thumb::ThumbnailSize::Small,
-                ThumbnailSize::Large => thumb::ThumbnailSize::Large,
-            },
+            size: thumb_size(request.size),
         };
         let drawn = client
             .call(asked)
@@ -166,6 +235,13 @@ impl LoreMcp {
             media_type: drawn.media_type,
             data: drawn.data,
         })
+    }
+}
+
+fn thumb_size(size: ThumbnailSize) -> thumb::ThumbnailSize {
+    match size {
+        ThumbnailSize::Small => thumb::ThumbnailSize::Small,
+        ThumbnailSize::Large => thumb::ThumbnailSize::Large,
     }
 }
 
@@ -195,6 +271,16 @@ static ROUTES: LazyLock<Routes<LoreMcp>> = LazyLock::new(|| {
             policy(),
             |domain, request, context| async move { domain.thumbnail(request, context).await },
         )
+        .tool::<CoversRequest, _, _>(
+            "What shows each of many folders on its card: at most four files, or none.",
+            policy(),
+            |domain, request, context| async move { domain.covers(request, context).await },
+        )
+        .tool::<ThumbnailsRequest, _, _>(
+            "What is ready of many files by one request: each one's picture as base64, or none, or `pending` when `thumbnail` can still make one.",
+            policy(),
+            |domain, request, context| async move { domain.thumbnails(request, context).await },
+        )
         .app(
             AppBuilder::new(app(), APP_NAME)
                 .title(APP_TITLE)
@@ -203,7 +289,15 @@ static ROUTES: LazyLock<Routes<LoreMcp>> = LazyLock::new(|| {
                 .reader(|domain: LoreMcp, _| async move { Ok(domain.app.clone()) }),
         )
         .app_tools(&app(), &[ListFilesRequest::TOOL], &[UiVisibility::Model, UiVisibility::App])
-        .app_tools(&app(), &[ThumbnailRequest::TOOL], &[UiVisibility::App])
+        .app_tools(
+            &app(),
+            &[
+                ThumbnailRequest::TOOL,
+                CoversRequest::TOOL,
+                ThumbnailsRequest::TOOL,
+            ],
+            &[UiVisibility::App],
+        )
         .build()
 });
 

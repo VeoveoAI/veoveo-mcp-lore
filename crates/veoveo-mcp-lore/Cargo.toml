@@ -29,6 +29,7 @@ server = [
     "dep:axum",
     "dep:clap",
     "dep:dotenvy",
+    "dep:futures",
     "dep:reqwest",
     "dep:rmcp",
     "dep:rustls",
@@ -61,6 +62,7 @@ anyhow = { workspace = true, optional = true }
 axum = { workspace = true, features = ["http1", "tokio"], optional = true }
 clap = { workspace = true, optional = true }
 dotenvy = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["rustls-no-provider"], optional = true }
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-streamable-http-server"], optional = true }
 rustls = { workspace = true, optional = true }

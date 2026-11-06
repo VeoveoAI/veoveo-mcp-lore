@@ -38,7 +38,7 @@ async fn tools_are_listed_with_their_permission() {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         names.sort_unstable();
-        assert_eq!(names, ["list_files", "thumbnail"]);
+        assert_eq!(names, ["covers", "list_files", "thumbnail", "thumbnails"]);
 
         let refused = hub(&[])
             .rpc("tools/call", json!({"name": "list_files", "arguments": {}}))
