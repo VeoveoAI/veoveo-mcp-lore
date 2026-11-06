@@ -170,14 +170,27 @@ impl Hub {
 impl Reader {
     async fn get(&self, url: url::Url, timeout: Duration) -> Result<Answer, HubError> {
         let bearer = self.client.hub_bearer().await?;
-        let response = self
-            .hub
-            .http
-            .get(url)
-            .bearer_auth(bearer.expose())
-            .timeout(timeout)
-            .send()
-            .await?;
+        // A read changes nothing, and a connection can drop between requests, so one that got no
+        // answer at all is sent again. One that ran out of time has had its time.
+        let send = || {
+            self.hub
+                .http
+                .get(url.clone())
+                .bearer_auth(bearer.expose())
+                .timeout(timeout)
+                .send()
+        };
+        let mut response = send().await;
+        for wait in [200, 1000] {
+            match &response {
+                Err(error) if !error.is_timeout() => {
+                    tokio::time::sleep(Duration::from_millis(wait)).await;
+                    response = send().await;
+                }
+                _ => break,
+            }
+        }
+        let response = response?;
         let status = response.status();
         let revision = response
             .headers()
