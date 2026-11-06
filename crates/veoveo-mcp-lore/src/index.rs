@@ -35,7 +35,7 @@ fn extension(name: &str) -> Option<String> {
     Some(name.rsplit_once('.')?.1.to_ascii_lowercase())
 }
 
-fn is_stage(name: &str) -> bool {
+pub fn is_stage(name: &str) -> bool {
     extension(name).is_some_and(|extension| STAGES.contains(&extension.as_str()))
 }
 
@@ -317,8 +317,12 @@ impl Indexes {
         if let Some(index) = current(&self.latest(repository, branch)) {
             return Ok(index);
         }
+        let started = std::time::Instant::now();
         let tree = reader.tree(repository, branch).await?;
+        let read_ms = started.elapsed().as_millis();
+        let entries = tree.entries.len();
         let index = Arc::new(Index::build(tree.entries, tree.revision));
+        tracing::info!(%repository, entries, read_ms, total_ms = started.elapsed().as_millis(), "read a repository's whole tree");
         let mut held = self.held.lock().unwrap_or_else(|held| held.into_inner());
         held.insert(key, index.clone());
         Ok(index)

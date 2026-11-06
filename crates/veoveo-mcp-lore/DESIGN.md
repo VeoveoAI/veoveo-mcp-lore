@@ -66,7 +66,7 @@ the whole tree again. A page of repositories reads none of them: it shows what w
 
 Pictures come with the page. `thumbnails` and `thumbnail` keep each small picture the Thumb server answers, on disk, under what it shows: the file's
 content address, and for a stage that is not a package the revision too, since it may name other files. `browse` answers from what is kept, up to 3 MiB a
-page, and the page asks for the rest. A page names only what its person's read listed, so what is kept reaches no one else, and any of it can be fetched again.
+page, and the page asks for the rest. A file with no picture is believed for an hour, since that may mean a draw failed. A page names only what its person's read listed, so what is kept reaches no one else, and any of it can be fetched again.
 
 It shows `main`. A branch is a tool argument, not yet a choice in the App.
 

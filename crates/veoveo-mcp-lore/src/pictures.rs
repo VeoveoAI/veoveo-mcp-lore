@@ -16,6 +16,8 @@ pub enum Kept {
 }
 
 const NOTHING: &str = "nothing";
+/// How long "it has no picture" is believed. It may mean a draw failed, which is tried again.
+const NOTHING_LASTS: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 const KINDS: [(&str, &str); 3] = [
     ("image/webp", "webp"),
     ("image/jpeg", "jpeg"),
@@ -56,8 +58,12 @@ impl Pictures {
                 });
             }
         }
-        let nothing = tokio::fs::try_exists(self.folder.join(format!("{key}.{NOTHING}"))).await;
-        nothing.unwrap_or(false).then_some(Kept::Nothing)
+        let noted = tokio::fs::metadata(self.folder.join(format!("{key}.{NOTHING}")))
+            .await
+            .ok()?
+            .modified()
+            .ok()?;
+        (noted.elapsed().ok()? < NOTHING_LASTS).then_some(Kept::Nothing)
     }
 
     /// Keeps a picture, whole or not at all. A failure costs a later fetch.

@@ -25,7 +25,7 @@ use crate::{
         ThumbnailsRequest,
     },
     hub::{EntryKind, Hub, HubError, Reader},
-    index::{Index, Indexes, Item},
+    index::{Index, Indexes, Item, is_stage},
     pictures::{Kept, Pictures},
 };
 
@@ -353,13 +353,26 @@ impl LoreMcp {
                 "at most {MOST_AT_ONCE} files at a time"
             )));
         }
+        // A stage is the USD server's to draw, one at a time, so asking what is ready of it would
+        // only cost the calls to say so.
+        let (stages, files): (Vec<_>, Vec<_>) = request
+            .files
+            .iter()
+            .enumerate()
+            .partition(|(_, file)| is_stage(file.path.file_name()));
+        let mut thumbnails = vec![ReadyThumbnail::default(); request.files.len()];
+        for (at, _) in &stages {
+            thumbnails[*at].pending = true;
+        }
+        if files.is_empty() {
+            return Ok(FileThumbnails { thumbnails });
+        }
         let client = context.client().map_err(|error: McpError| {
             ToolError::Rejected(format!("no calls for the caller: {}", error.message))
         })?;
-        let sources = request
-            .files
+        let sources = files
             .iter()
-            .map(|file| {
+            .map(|(_, file)| {
                 Ok(thumb::FileSource::Lore {
                     repository: thumb::RepositoryId::parse(file.repository.as_str())?,
                     branch: thumb::BranchName::parse(file.branch.as_str())?,
@@ -375,36 +388,28 @@ impl LoreMcp {
             })
             .await
             .map_err(|error| ToolError::Rejected(format!("reading the files: {error}")))?;
-        if request.size == ThumbnailSize::Small {
-            let reader = self.reader(&context)?;
-            let mut by_place: std::collections::BTreeMap<_, Vec<_>> =
-                std::collections::BTreeMap::new();
-            for (file, one) in request.files.iter().zip(&ready.thumbnails) {
-                if !one.pending {
-                    by_place
-                        .entry((file.repository.clone(), file.branch.clone()))
-                        .or_default()
-                        .push((
-                            file.path.clone(),
-                            kept_of(one.media_type.clone(), one.data.clone()),
-                        ));
-                }
+        let mut by_place: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+        for ((at, file), one) in files.iter().zip(ready.thumbnails) {
+            if !one.pending && request.size == ThumbnailSize::Small {
+                by_place
+                    .entry((file.repository.clone(), file.branch.clone()))
+                    .or_default()
+                    .push((
+                        file.path.clone(),
+                        kept_of(one.media_type.clone(), one.data.clone()),
+                    ));
             }
-            for ((repository, branch), kept) in by_place {
-                self.keep(&reader, &repository, &branch, kept).await;
-            }
+            thumbnails[*at] = ReadyThumbnail {
+                media_type: one.media_type,
+                data: one.data,
+                pending: one.pending,
+            };
         }
-        Ok(FileThumbnails {
-            thumbnails: ready
-                .thumbnails
-                .into_iter()
-                .map(|one| ReadyThumbnail {
-                    media_type: one.media_type,
-                    data: one.data,
-                    pending: one.pending,
-                })
-                .collect(),
-        })
+        let reader = self.reader(&context)?;
+        for ((repository, branch), kept) in by_place {
+            self.keep(&reader, &repository, &branch, kept).await;
+        }
+        Ok(FileThumbnails { thumbnails })
     }
 
     /// A file's picture, from the Thumb server, which reads the file as the same person. No Thumb
